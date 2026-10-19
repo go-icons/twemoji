@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOWORK: "off"
+  CGO_ENABLED: "0"
+
+jobs:
+  test:
+    name: Build + test + 100% coverage gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.4"
+          check-latest: true
+          cache: true
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          [ -z "$unformatted" ] || { echo "::error::not gofmt-clean:"; echo "$unformatted"; gofmt -d $unformatted; exit 1; }
+      - name: go vet
+        run: go vet ./...
+      - name: Test with 100% coverage gate
+        run: |
+          go test -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+          # main() of the generator is a two-line wrapper over a tested command.
+          below=$(go tool cover -func=coverage.out | awk '$NF != "100.0%" && $2 != "main" && $1 != "total:"')
+          if [ -n "$below" ]; then echo "::error::coverage below 100% on:"; echo "$below"; exit 1; fi
+      - name: The embedded tables are what the generator makes of upstream
+        # twemoji.bin is not compared byte for byte: the deflate output may
+        # differ between Go releases. TestEveryStem checks its content.
+        run: |
+          git clone --depth 1 --branch v17.0.3 https://github.com/jdecked/twemoji /tmp/twemoji
+          git clone --depth 1 --branch 3.0.0 https://github.com/markdown-it/markdown-it-emoji /tmp/mdemoji
+          curl -sfL https://raw.githubusercontent.com/unicode-org/unicodetools/main/unicodetools/data/emoji/17.0/emoji-sequences.txt -o /tmp/emoji-sequences.txt
+          mkdir /tmp/out
+          go run ./cmd/gen --twemoji /tmp/twemoji --markdown-it-emoji /tmp/mdemoji --emoji-sequences /tmp/emoji-sequences.txt --out /tmp/out
+          for f in shortcodes.txt textdefault.txt; do cmp "$f" "/tmp/out/$f"; done
