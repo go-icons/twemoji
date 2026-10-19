@@ -163,9 +163,8 @@ func TestInflateRefusals(t *testing.T) {
 	}
 	// Corrupt the compressed bytes.
 	bad := bytes.Clone(good)
-	for i := len(bad) - 6; i < len(bad); i++ {
-		bad[i] ^= 0xFF
-	}
+	clen := int(good[12]) | int(good[13])<<8 | int(good[14])<<16
+	bad[len(bad)-clen] = 0x07 // BFINAL with BTYPE 11, a reserved type: invalid in every version
 	b, err := Open(string(bad))
 	if err != nil {
 		t.Fatal(err)
